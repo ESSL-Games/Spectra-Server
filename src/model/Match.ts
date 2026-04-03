@@ -10,6 +10,7 @@ import {
   IFormattedRoundInfo,
   IFormattedScore,
   IFormattedScoreboard,
+  IToastInfo,
 } from "./eventData";
 import logging from "../util/Logging";
 import { ReplayLogging } from "../util/ReplayLogging";
@@ -53,6 +54,14 @@ export class Match {
   private timeoutGracePeriodPassed: boolean = false;
 
   private toastEndTimeout: any = undefined;
+  private toastInfo: IToastInfo = {
+    active: false,
+    title: "",
+    message: "",
+    duration: null,
+    eventLogoEnabled: true,
+    selectedTeam: undefined,
+  };
 
   private hasEnteredOvertime: boolean = false;
 
@@ -251,6 +260,7 @@ export class Match {
           case "combat":
             this.teams.forEach((team) => team.findDuplicateAgents());
             this.roundTimeoutTime = data.timestamp + 99 * 1000; // Add 99 seconds to the current time
+            this.toastInfo.active = false;
             break;
 
           case "end":
@@ -278,13 +288,10 @@ export class Match {
             if (this.isRegistered) {
               DatabaseConnector.completeMatch(this);
 
-              // Supporter Early Access, will be public in future
-              if (this.orgIsSupporter) {
-                // Wait 5 seconds to ensure API is ready
-                setTimeout(() => {
-                  DatabaseConnector.statsFetchStats(this.matchId);
-                }, 15000);
-              }
+              // Wait 15 seconds to ensure API is ready
+              setTimeout(() => {
+                DatabaseConnector.statsFetchStats(this.matchId);
+              }, 15000);
             }
 
             return;
@@ -300,14 +307,11 @@ export class Match {
           await DatabaseConnector.registerMatch(this);
           this.isRegistered = true;
 
-          // Supporter Early Access, will be public in future
-          if (this.orgIsSupporter) {
-            await DatabaseConnector.statsAddMatch(this.groupCode, this.matchId);
-            await DatabaseConnector.statsUpdateMatchRegion(
-              this.matchId,
-              this.teams[0].getFirstPlayerId(),
-            );
-          }
+          await DatabaseConnector.statsAddMatch(this.groupCode, this.matchId);
+          await DatabaseConnector.statsUpdateMatchRegion(
+            this.matchId,
+            this.teams[0].getFirstPlayerId(),
+          );
         }
 
         break;
@@ -360,7 +364,7 @@ export class Match {
         break;
 
       case DataTypes.TOAST:
-        this.handleToast();
+        this.handleToast(data.data as IToastInfo);
         break;
       case DataTypes.SWAP_A_D:
         this.handleSwapAD();
@@ -503,23 +507,25 @@ export class Match {
     this.spikeDetonationTime = timestamp + 45 * 1000; // Add 45 seconds to the current time
   }
 
-  private handleToast() {
-    if (this.tools.toastInfo.active) {
+  private handleToast(data: IToastInfo) {
+    if (this.toastInfo.active) {
       // Toast is active — deactivate it immediately
-      this.tools.toastInfo.active = false;
+      this.toastInfo.active = false;
       clearTimeout(this.toastEndTimeout);
       this.toastEndTimeout = undefined;
     } else {
-      // Activate the toast
-      this.tools.toastInfo.active = true;
+      // Activate the toast with data from the event
+      this.toastInfo = data;
+      this.toastInfo.active = true;
+      this.eventNumber++;
 
-      if (this.tools.toastInfo.duration !== null) {
+      if (this.toastInfo.duration !== null) {
         // Auto-deactivate after the configured duration (ms)
         this.toastEndTimeout = setTimeout(() => {
-          this.tools.toastInfo.active = false;
+          this.toastInfo.active = false;
           this.toastEndTimeout = undefined;
           this.eventNumber++;
-        }, this.tools.toastInfo.duration);
+        }, this.toastInfo.duration);
       }
       // If duration is null, the toast stays until the hotkey is pressed again
     }
